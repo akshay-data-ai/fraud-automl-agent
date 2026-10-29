@@ -4,6 +4,7 @@ import io
 import joblib
 import pandas as pd
 import streamlit as st
+from diagnostics import (compare_drift, data_quality_report, evaluate_scored_labels, reliability_warnings)
 
 from automl_engine import (
     MAX_COLUMNS, MAX_ROWS, predict_new_rows,
@@ -63,6 +64,18 @@ with st.expander("Preview dataset and missing values", expanded=True):
     missing = data.isna().sum()
     st.dataframe(missing[missing > 0].rename("Missing").to_frame(), use_container_width=True)
 
+st.subheader("Automated data quality report")
+quality = data_quality_report(data)
+q1, q2, q3 = st.columns(3)
+q1.metric("Exact duplicate rows", f"{quality['duplicate_rows']:,}")
+q2.metric("Missing cells", f"{quality['missing_cells']:,}")
+q3.metric("Affected columns", int((quality["column_report"]["Missing"] > 0).sum()))
+with st.expander("Column quality details", expanded=False):
+    st.dataframe(quality["column_report"], hide_index=True, use_container_width=True)
+    for warning in quality["warnings"]:
+        st.warning(warning)
+st.download_button("Download data quality CSV", quality["column_report"].to_csv(index=False), "data_quality.csv", mime="text/csv")
+
 candidates = [c for c in data if data[c].dropna().nunique() == 2]
 if not candidates:
     st.error("No columns with two unique target values were found. Please upload a labeled binary classification dataset.")
@@ -99,6 +112,8 @@ excluded = st.multiselect(
     help="Review these carefully. Post-transaction balances and existing fraud flags "
          "are not usually available before the prediction decision.",
 )
+with st.expander("Target label distribution"):
+    st.dataframe(data_quality_report(data, target)["label_counts"], hide_index=True, use_container_width=True)
 st.caption(
     "Model selection uses validation **Average Precision**; thresholds are chosen "
     "using validation F1. The final test split is not used to tune the models."
@@ -176,6 +191,12 @@ with st.expander("Training report", expanded=False):
     st.write("Split:", "Chronological by " + time_col if time_col else "Stratified random 60/20/20")
     st.write(f"Final test positive prevalence: {result['test_fraud_rate']:.2%}")
 
+st.subheader("Model reliability checks")
+for alert in reliability_warnings(result):
+    st.warning(alert)
+if not reliability_warnings(result):
+    st.info("No automatic warnings on the current internal evaluation. This does not certify production readiness.")
+
 st.subheader("Score new transactions using the recommended model")
 st.caption(
     "Upload an unlabeled CSV containing the same feature columns. "
@@ -193,6 +214,27 @@ if new_file:
             else:
                 scored = predict_new_rows(result, new)
                 st.metric("Flagged as positive", int((scored["predicted_label"] == result["positive_label"]).sum()))
+                st.subheader("Dataset shift versus training data")
+                drift = compare_drift(result["training_reference"], new)
+                st.dataframe(drift, hide_index=True, use_container_width=True)
+                st.caption("Numeric PSI and categorical TVD are descriptive indicators, not proof of harmful drift. Reference profiles use training rows only.")
+                st.download_button("Download drift report", drift.to_csv(index=False), "drift_report.csv", mime="text/csv")
+                labels_available = [col for col in new.columns if new[col].dropna().astype(str).isin([result["positive_label"], result["negative_label"]]).all() and new[col].dropna().nunique() == 2]
+                options = ["None"] + labels_available
+                preferred_label = result["target_column"] if result["target_column"] in labels_available else "None"
+                choice = st.selectbox("Optional independent ground-truth label column", options, index=options.index(preferred_label), key="eval_label_column", help="Only select if this is independently labeled data, not data already used during training. Do not use results to retune the held-out test.")
+                evaluation = None
+                if choice != "None":
+                    evaluation = evaluate_scored_labels(result, scored, label_col=choice)
+                    st.subheader("Independent labeled-data evaluation")
+                    x1, x2, x3 = st.columns(3)
+                    x1.metric("Precision", f"{evaluation['Precision']:.2%}")
+                    x2.metric("Recall", f"{evaluation['Recall']:.2%}")
+                    x3.metric("F1", f"{evaluation['F1']:.2%}")
+                    st.dataframe(pd.DataFrame([evaluation]), hide_index=True, use_container_width=True)
+                    st.download_button("Download evaluation CSV", pd.DataFrame([evaluation]).to_csv(index=False), "independent_evaluation.csv", mime="text/csv")
+                for alert in reliability_warnings(result, scored=scored, evaluation=evaluation, drift=drift):
+                    st.warning(alert)
                 st.dataframe(scored.head(300), hide_index=True, use_container_width=True)
                 st.download_button(
                     "Download all predictions",
