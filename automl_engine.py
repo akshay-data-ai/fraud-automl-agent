@@ -25,6 +25,7 @@ from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import FunctionTransformer, OneHotEncoder, StandardScaler
 from sklearn.tree import DecisionTreeClassifier
+from diagnostics import training_reference
 
 RANDOM_STATE = 42
 MAX_ROWS = 50_000
@@ -306,6 +307,7 @@ def train_automl(
     train_x = train_x[cols]
     val_x = val_x[cols]
     test_x = test_x[cols]
+    reference = training_reference(train_x, cols)
 
     comparison = []
     trained = {}
@@ -356,6 +358,7 @@ def train_automl(
         "target_column": target_col,
         "features": cols,
         "derived_features": derived,
+        "training_reference": reference,
         "removed_constant": constant,
         "excluded": sorted(ignored - {target_col}),
         "time_column": time_col,
