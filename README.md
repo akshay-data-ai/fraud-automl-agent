@@ -14,6 +14,15 @@ A standalone, experimental Streamlit application for automated **binary classifi
 - One-time selected-model test evaluation
 - Batch predictions and downloadable trusted model pipeline
 
+## Experimental reliability diagnostics
+
+- CSV data-quality table with missing values, column types, duplicates and target balance.
+- A **training-split-only aggregate reference profile** is retained in session memory for each trained model.
+- After uploading a new CSV, compare distributions via numeric **Population Stability Index (PSI)** and categorical **Total Variation Distance (TVD)**. These thresholds are heuristic alerts, not statistical guarantees.
+- Optionally choose a label column for **independently labeled** new transactions to compute precision, recall, F1, average precision, confusion-matrix counts and ROC-AUC.
+- Reliability warnings identify zero flags, low recall, near-baseline average precision and large distribution shifts.
+- These warnings do not override validation-only model selection. Do not repurpose the original training or holdout dataset as an independent scoring benchmark.
+
 ## Run locally
 
 Requires Python **3.11** (dependencies include scikit-learn 1.6.1).
